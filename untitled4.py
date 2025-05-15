@@ -5,7 +5,8 @@ import cv2
 from ultralytics import YOLO
 from filterpy.kalman import KalmanFilter
 from scipy.optimize import linear_sum_assignment as linear_assignment
-import time
+import mysql.connector
+from mysql.connector import Error
 
 def iou(bb_test, bb_gt):
     xx1 = np.maximum(bb_test[0], bb_gt[0])
@@ -172,7 +173,41 @@ class Sort:
             return np.concatenate(ret)
         return np.empty((0, 5))
 
+# MySQL Connection Setup
+def connect_db():
+    try:
+        conn = mysql.connector.connect(
+            host='localhost',        # Change to your DB host
+            database='people_count', # Change to your DB name
+            user='vara',     # Change to your DB user
+            password='BhSU1046!'  # Change to your DB password
+        )
+        if conn.is_connected():
+            print("Connected to MySQL database")
+            return conn
+    except Error as e:
+        print(f"Error connecting to MySQL: {e}")
+        return None
+
+def insert_counts(conn, people_in, people_out, current_count):
+    try:
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO people_count (people_in, people_out, current_count)
+            VALUES (%s, %s, %s)
+        """
+        cursor.execute(sql, (people_in, people_out, current_count))
+        conn.commit()
+        cursor.close()
+    except Error as e:
+        print(f"Error inserting counts into DB: {e}")
+
 def main(video_source=0):
+    conn = connect_db()
+    if conn is None:
+        print("Database connection failed. Exiting.")
+        return
+
     model = YOLO('yolov8n.pt')
     tracker = Sort(max_age=20, min_hits=3, iou_threshold=0.3)
 
@@ -192,6 +227,10 @@ def main(video_source=0):
     current_count = 0
 
     track_memory = {}
+
+    last_people_in = people_in
+    last_people_out = people_out
+    last_current_count = current_count
 
     while True:
         ret, frame = cap.read()
@@ -236,12 +275,20 @@ def main(video_source=0):
         cv2.putText(frame, f'Out: {people_out}', (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         cv2.putText(frame, f'Current: {current_count}', (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
 
+        # Insert into DB only if counts changed
+        if (people_in != last_people_in) or (people_out != last_people_out) or (current_count != last_current_count):
+            insert_counts(conn, people_in, people_out, current_count)
+            last_people_in = people_in
+            last_people_out = people_out
+            last_current_count = current_count
+
         cv2.imshow('People Counting', frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     cap.release()
     cv2.destroyAllWindows()
+    conn.close()
 
 if __name__ == "__main__":
     main(0)
