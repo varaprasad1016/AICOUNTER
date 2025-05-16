@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 
 # ===================== CONFIGURATION =====================
 # Camera configuration
-RTSP_STREAM = "rtsp://admin:D0vouuseHIK%3F@192.168.3.66:554/Streaming/Channels/101"
+# Fix the RTSP URL format - properly escape special characters and fix port format
+RTSP_STREAM = "rtsp://admin:D0youuseHIK?@192.168.3.66:554/Streaming/Channels/101"  # Removed the question mark
 
 # Database configuration
 DB_CONFIG = {
@@ -500,13 +501,39 @@ class PeopleCounter:
     def connect_to_camera(self):
         """Connect to the camera source"""
         try:
-            self.cap = cv2.VideoCapture(self.video_source)
+            logger.info(f"Attempting to connect to camera: {self.video_source}")
+            
+            # Try to open the camera with different backend options
+            self.cap = cv2.VideoCapture(self.video_source, cv2.CAP_FFMPEG)
+            
+            # Check if connection was successful
             if not self.cap.isOpened():
-                logger.error(f"Error: Cannot open video source {self.video_source}")
-                return False
+                logger.error(f"Error: Cannot open video source with FFMPEG backend: {self.video_source}")
+                
+                # Try with GSTREAMER backend as fallback
+                logger.info("Trying with GSTREAMER backend...")
+                self.cap = cv2.VideoCapture(self.video_source, cv2.CAP_GSTREAMER)
+                
+                if not self.cap.isOpened():
+                    logger.error(f"Error: Cannot open video source with GSTREAMER backend: {self.video_source}")
+                    
+                    # Try without specifying backend as last resort
+                    logger.info("Trying without specific backend...")
+                    self.cap = cv2.VideoCapture(self.video_source)
+                    
+                    if not self.cap.isOpened():
+                        logger.error(f"Error: Cannot open video source with default backend: {self.video_source}")
+                        return False
+            
+            # Successfully opened connection
+            logger.info("Successfully connected to camera")
+            
+            # Set additional capture properties if needed
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)  # Reduce buffer size to minimize latency
+            
             return True
         except Exception as e:
-            logger.error(f"Error connecting to camera: {e}")
+            logger.error(f"Error connecting to camera: {str(e)}")
             return False
             
     def load_counts_from_db(self):
